@@ -147,7 +147,13 @@ describe("wrapped contextBridge exposure methods", () => {
         `const worldId = selectWorld(); electron.contextBridge.exposeInIsolatedWorld(worldId, "isolatedApi", {ping: true});`,
       ),
     );
-    expect(result.electron.context_bridge_apis).toContainEqual(
+    // Bundled require identity proves `load(2)` is Electron, so the direct
+    // observation owns this exposure and wrapper substitution adds no duplicate.
+    expect(
+      result.electron.context_bridge_apis?.filter(
+        ({ api_key }) => api_key === "isolatedApi",
+      ),
+    ).toEqual([
       expect.objectContaining({
         world: "isolated",
         world_id: {
@@ -156,10 +162,11 @@ describe("wrapped contextBridge exposure methods", () => {
           expression: "worldId",
         },
         api_key: "isolatedApi",
+        api_status: "object-literal",
         members: ["ping"],
-        resolution_basis: "wrapper-substitution",
+        module_key: "9",
       }),
-    );
+    ]);
     expect(result.parse_status).toBe("partial");
   });
 

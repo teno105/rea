@@ -779,22 +779,35 @@ describe("native IDA attached operation admission", () => {
     await client.close();
   });
 
-  it("does not admit the headless-only containment and document operations", async () => {
+  it("does not admit headless-only address containment", async () => {
     const { client, producer } = await fixture();
-    for (const [operation, parameters] of [
-      ["resolve_containing_procedure", { address: "0x1000" }],
-      ["list_documents", {}],
-    ] as const) {
-      const result = await client.execute(operation, parameters);
+    const result = await client.execute("resolve_containing_procedure", {
+      address: "0x1000",
+    });
 
-      expect(result.ok).toBe(false);
-      if (!result.ok)
-        expect(result.error._tag).toBe("AnalysisCapabilityUnavailableError");
-    }
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.error._tag).toBe("AnalysisCapabilityUnavailableError");
     expect(
       producer.calls.some(({ name }) => name === "lookup_funcs"),
       "nothing is dispatched upstream",
     ).toBe(false);
+    await client.close();
+  });
+
+  it("lists the admitted program without an upstream document listing", async () => {
+    const { client, producer, target } = await fixture();
+    const before = producer.calls.length;
+    const result = await client.execute("list_documents", {});
+
+    if (!result.ok) throw result.error;
+    expect(result.value.result).toEqual([target.path]);
+    expect(
+      producer.calls
+        .slice(before)
+        .filter(({ name }) => name !== "get_metadata")
+        .map(({ name }) => name),
+    ).toEqual([]);
     await client.close();
   });
 });

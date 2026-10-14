@@ -334,7 +334,7 @@ const builtinBindingPath = (
   specifiers: readonly string[],
   capture: t.Node,
   selectedPath: readonly string[] = [],
-  callableValue = false,
+  selectedValueUse = false,
   visited: ReadonlySet<string> = new Set(),
   memo: BuiltinBindingMemo = new Map(),
   provenanceCapture?: t.Identifier,
@@ -344,7 +344,7 @@ const builtinBindingPath = (
   const key = JSON.stringify([
     binding.bindingId,
     selectedPath,
-    callableValue,
+    selectedValueUse,
     provenanceCapture?.start,
     provenanceCapture?.end,
     savedObjectCapture?.start,
@@ -363,7 +363,7 @@ const builtinBindingPath = (
     specifiers,
     capture,
     selectedPath,
-    callableValue,
+    selectedValueUse,
     visited,
     memo,
     provenanceCapture,
@@ -379,7 +379,7 @@ const computeBuiltinBindingPath = (
   specifiers: readonly string[],
   capture: t.Node,
   selectedPath: readonly string[] = [],
-  callableValue = false,
+  selectedValueUse = false,
   visited: ReadonlySet<string>,
   memo: BuiltinBindingMemo,
   provenanceCapture?: t.Identifier,
@@ -412,9 +412,9 @@ const computeBuiltinBindingPath = (
     builtinEscapes(binding, state).some(
       ({ path, node }) =>
         affectsBuiltinPath(path, selectedPath) &&
-        // A function-value escape cannot replace its native [[Call]]. An
-        // escaped containing object can still replace the selected method.
-        (!callableValue || path.length < selectedPath.length) &&
+        // An escaped value cannot replace the slot that holds it, so a use of
+        // only that slot's value is changed by an escaped container alone.
+        (!selectedValueUse || path.length < selectedPath.length) &&
         !semanticTopLevelEffectFollowsCapture(
           capture,
           node,
@@ -452,7 +452,7 @@ const computeBuiltinBindingPath = (
         shared.path,
         capture,
         state,
-        callableValue,
+        selectedValueUse,
       )
     )
       return null;
@@ -470,7 +470,7 @@ const computeBuiltinBindingPath = (
             ? initializer.node
             : savedObjectCapture,
         capture:
-          callableValue &&
+          selectedValueUse &&
           selectedPath.length === 0 &&
           initializer.projection.length > 0
             ? initializer.node
@@ -488,7 +488,7 @@ const computeBuiltinBindingPath = (
           specifiers,
           current.capture,
           current.path,
-          callableValue,
+          selectedValueUse,
           ancestors,
           memo,
           node,
@@ -512,7 +512,9 @@ const computeBuiltinBindingPath = (
           savedObjectCapture: current.savedObjectCapture,
           // Freeze a selected function, not later member reads through a saved object.
           capture:
-            callableValue && selectedPath.length === 0 ? node : current.capture,
+            selectedValueUse && selectedPath.length === 0
+              ? node
+              : current.capture,
         });
       } else if (t.isSequenceExpression(node)) {
         const final = node.expressions.at(-1);
@@ -539,7 +541,7 @@ const computeBuiltinBindingPath = (
             [...required.origin.importedPath, ...current.path],
             current.capture,
             state,
-            callableValue,
+            selectedValueUse,
             current.savedObjectCapture,
           )
         )
@@ -714,7 +716,7 @@ const requiredModuleChanged = (
   selected: readonly string[],
   capture: t.Node,
   state: JavaScriptSemanticAnalysisState,
-  callableValue = false,
+  selectedValueUse = false,
   savedObjectCapture?: t.Node,
 ): boolean => {
   const identity = semanticRequireExportsIdentity(specifier, selected);
@@ -736,7 +738,7 @@ const requiredModuleChanged = (
         state.parentsByNode,
       ) &&
       (kind === "write" ||
-        !callableValue ||
+        !selectedValueUse ||
         path.length < identity.path.length),
   );
 };
@@ -850,10 +852,13 @@ export const isSemanticProcessObject = (
   if (!t.isIdentifier(node)) return false;
   const binding = resolveSemanticBindingState(state, node, node.name);
   const selected = key === undefined || key === null ? [family] : [family, key];
+  // A static key reads only that slot's value, so passing the value elsewhere
+  // cannot change it. A dynamic key reads through the escapable family object.
+  const selectedValueUse = selected.length === 2;
   if (binding === undefined)
     return (
       semanticGlobalProcessOrigin(node, state) !== undefined &&
-      !requiredModuleChanged("process", selected, node, state)
+      !requiredModuleChanged("process", selected, node, state, selectedValueUse)
     );
   return (
     builtinBindingPath(
@@ -862,6 +867,7 @@ export const isSemanticProcessObject = (
       ["process", "node:process"],
       node,
       selected,
+      selectedValueUse,
     )?.length === 0
   );
 };
